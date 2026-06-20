@@ -1,0 +1,16 @@
+{
+  "name": "zeno-coding-agent",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Zeno session manager, JSON-RPC client, pruning and permission gate (Node).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test \"dist/**/*.test.js\""
+  },
+  "license": "MIT"
+}

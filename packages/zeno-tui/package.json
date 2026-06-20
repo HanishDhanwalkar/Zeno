@@ -1,0 +1,25 @@
+{
+  "name": "zeno-tui",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Zeno terminal UI: Renderer interface + Ink/plain renderers + CLI entry (Node).",
+  "bin": {
+    "zeno": "dist/cli.js"
+  },
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "ink": "^5.2.1",
+    "ink-text-input": "^6.0.0",
+    "react": "^18.3.1",
+    "zeno-coding-agent": "*"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/react": "^18.3.31"
+  }
+}
+rpc

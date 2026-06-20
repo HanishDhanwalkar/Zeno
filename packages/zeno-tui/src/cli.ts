@@ -168,6 +168,29 @@ async function main(): Promise<void> {
     const input = await renderer.prompt();
     if (input === null) break;
     if (!input.trim()) continue;
+
+    // Handle slash commands
+    if (input.startsWith("/")) {
+      const parts = input.slice(1).split(/\s+/);
+      const command = parts[0];
+      const rest = parts.slice(1).join(" ");
+
+      if (command === "model") {
+        if (rest) {
+          args.model = rest;
+          session.model = rest;
+          renderer.setStatusLine(status());
+          continue;
+        } else {
+          renderer.error(`Current model: ${args.model}`);
+          continue;
+        }
+      } else {
+        renderer.error(`Unknown command: /${command}`);
+        continue;
+      }
+    }
+
     renderer.setStatusLine("thinking...");
     await session.sendUserMessage(input);
   }

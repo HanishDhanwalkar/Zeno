@@ -34,7 +34,7 @@ interface CliArgs {
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     model: process.env.ZENO_MODEL ?? "mock",
-    headless: false,
+    headless: true,
     root: process.cwd(),
   };
   for (let i = 0; i < argv.length; i++) {
@@ -67,15 +67,6 @@ function loadEnv(dir: string): void {
 }
 
 async function pickRenderer(headless: boolean): Promise<Renderer> {
-  const canInk = !headless && Boolean(process.stdin.isTTY);
-  if (canInk) {
-    try {
-      const { InkRenderer } = await import("./inkRenderer.js");
-      return new InkRenderer();
-    } catch (err) {
-      process.stderr.write(`(ink unavailable, using plain renderer: ${err})\n`);
-    }
-  }
   return new PlainRenderer();
 }
 

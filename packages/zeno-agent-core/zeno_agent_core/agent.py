@@ -35,11 +35,12 @@ def _sanitize_messages(messages: list[dict]) -> list[dict]:
     sanitized = []
     for msg in messages:
         msg = dict(msg)  # Create a copy
-        
+
         # Sanitize content to remove surrogates
         if "content" in msg and isinstance(msg["content"], str):
-            msg["content"] = msg["content"].encode("utf-8", errors="replace").decode("utf-8")
-        
+            msg["content"] = msg["content"].encode(
+                "utf-8", errors="replace").decode("utf-8")
+
         # Sanitize tool_calls arguments
         if msg.get("role") == "assistant" and "tool_calls" in msg:
             msg["tool_calls"] = [
@@ -56,7 +57,7 @@ def _sanitize_messages(messages: list[dict]) -> list[dict]:
                 }
                 for tc in msg["tool_calls"]
             ]
-        
+
         sanitized.append(msg)
     return sanitized
 
@@ -148,7 +149,11 @@ class AgentLoop:
                 decision = await self.permission_cb(call_id, name, args)
                 if not decision.get("allow", True):
                     reason = decision.get("reason", "denied by user")
-                    result = {"output": "", "truncated": False, "error": reason}
+                    result = {
+                        "output": "",
+                        "truncated": False, 
+                        "error": reason
+                    }
                 else:
                     updated = decision.get("updatedArgs")
                     if updated is not None:

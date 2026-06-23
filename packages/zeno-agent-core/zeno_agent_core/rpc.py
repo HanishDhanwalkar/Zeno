@@ -62,7 +62,11 @@ class JsonRpcServer:
             sys.stdout.flush()
 
     def notify(self, method: str, params: dict | None = None) -> None:
-        self._write({"jsonrpc": "2.0", "method": method, "params": params or {}})
+        self._write({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params or {}
+        })
 
     def _respond(self, req_id: Any, result: Any = None, error: dict | None = None) -> None:
         msg: dict[str, Any] = {"jsonrpc": "2.0", "id": req_id}
@@ -97,14 +101,23 @@ class JsonRpcServer:
         if req_id is not None:
             handler = self._request_handlers.get(method)
             if handler is None:
-                self._respond(req_id, error={"code": -32601, "message": f"method not found: {method}"})
+                self._respond(
+                    req_id,
+                    error={
+                        "code": -32601,
+                        "message": f"method not found: {method}"
+                    }
+                )
                 return
             try:
                 result = await handler(params)
                 self._respond(req_id, result=result)
             except Exception as exc:  # pragma: no cover - defensive
                 log("request handler error:", method, exc)
-                self._respond(req_id, error={"code": -32000, "message": str(exc)})
+                self._respond(
+                    req_id,
+                    error={"code": -32000, "message": str(exc)}
+                )
         else:
             handler = self._notification_handlers.get(method)
             if handler is None:

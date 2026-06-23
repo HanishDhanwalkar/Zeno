@@ -64,7 +64,7 @@ function formatToolResult(result: ToolResult): string {
 export class SessionManager {
   readonly sessionId = randomUUID();
   readonly projectRoot: string;
-  readonly model: string;
+  model: string;
   readonly systemPrompt: string;
   readonly protectedTokens: number;
   messages: Message[] = [];

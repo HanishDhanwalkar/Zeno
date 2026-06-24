@@ -8,7 +8,7 @@
   },
   "main": "dist/cli.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"import {copyFileSync} from 'fs'; copyFileSync('src/models.json', 'dist/models.json')\"",
     "test": "tsc -p tsconfig.json && node --test \"dist/**/*.test.js\""
   },
   "dependencies": {

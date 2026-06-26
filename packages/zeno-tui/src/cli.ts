@@ -18,6 +18,12 @@ import {
 import type { Renderer } from "./renderer.js";
 import { PlainRenderer } from "./plainRenderer.js";
 
+interface ModelConfig {
+  id: string;
+  name: string;
+  description: string;
+}
+
 const SYSTEM_PROMPT = [
   "You are Zeno, an ultra-lean AI coding agent.",
   "You have exactly four tools: read, write, edit, bash.",
@@ -29,6 +35,39 @@ interface CliArgs {
   model: string;
   headless: boolean;
   root: string;
+}
+
+let modelsConfig: ModelConfig[] = [];
+
+function loadModelsConfig(): void {
+  try {
+    const configPath = path.join(import.meta.dirname ?? process.cwd(), "models.json");
+    const content = fs.readFileSync(configPath, "utf8");
+    const parsed = JSON.parse(content) as { models: ModelConfig[] };
+    modelsConfig = parsed.models;
+  } catch (err) {
+    modelsConfig = [
+      {
+        id: "mock",
+        name: "Mock (Offline)",
+        description: "Offline mock provider for testing",
+      },
+    ];
+  }
+}
+
+function getModelsConfigPath(): string {
+  return path.join(import.meta.dirname ?? process.cwd(), "models.json");
+}
+
+function saveModelsConfig(): boolean {
+  try {
+    const configPath = getModelsConfigPath();
+    fs.writeFileSync(configPath, JSON.stringify({ models: modelsConfig }, null, 2), "utf8");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -44,6 +83,40 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--root") args.root = path.resolve(argv[++i] ?? args.root);
   }
   return args;
+}
+
+const COMMANDS = [
+  { name: "model", description: "Change the current model" },
+  { name: "clear", description: "Clear session history" },
+  { name: "config", description: "Edit models configuration" },
+  { name: "help", description: "Show available commands" },
+];
+
+function getCommandSuggestions(prefix: string): string[] {
+  return COMMANDS.filter((c) => c.name.startsWith(prefix))
+    .map((c) => `/${c.name} — ${c.description}`);
+}
+
+function getModelSuggestions(prefix: string): string[] {
+  return modelsConfig
+    .filter((m) => m.id.toLowerCase().startsWith(prefix.toLowerCase()))
+    .map((m) => `${m.id} (${m.name})`);
+}
+
+function getAllCompletions(): string[] {
+  const completions: string[] = [];
+  
+  // Add all commands
+  COMMANDS.forEach((c) => {
+    completions.push(`/${c.name}`);
+  });
+  
+  // Add all models with /model prefix
+  modelsConfig.forEach((m) => {
+    completions.push(`/model ${m.id}`);
+  });
+  
+  return completions;
 }
 
 /** Tiny .env loader (no dependency). Does not overwrite existing env vars. */
@@ -66,6 +139,21 @@ function loadEnv(dir: string): void {
   }
 }
 
+async function handleConfigCommand(renderer: Renderer): Promise<void> {
+  renderer.addMessage("system", "Models Configuration:");
+  renderer.addMessage("system", "─".repeat(60));
+  
+  modelsConfig.forEach((m, i) => {
+    renderer.addMessage("system", `${i + 1}. ${m.id}`);
+    renderer.addMessage("system", `   Name: ${m.name}`);
+    renderer.addMessage("system", `   Desc: ${m.description}`);
+  });
+  
+  renderer.addMessage("system", "");
+  renderer.addMessage("system", "To edit, modify: " + getModelsConfigPath());
+  renderer.addMessage("system", "Format: JSON with 'models' array containing {id, name, description}");
+}
+
 async function pickRenderer(headless: boolean): Promise<Renderer> {
   return new PlainRenderer();
 }
@@ -84,6 +172,7 @@ async function main(): Promise<void> {
   const repoRoot = findRepoRoot();
   loadEnv(repoRoot);
   loadEnv(args.root);
+  loadModelsConfig();
 
   const renderer = await pickRenderer(args.headless);
 
@@ -162,6 +251,7 @@ async function main(): Promise<void> {
 
   renderer.onCancel(() => session.cancel());
   renderer.start();
+  renderer.setCompletions(getAllCompletions());
   renderer.setStatusLine(status());
 
   while (true) {
@@ -171,22 +261,54 @@ async function main(): Promise<void> {
 
     // Handle slash commands
     if (input.startsWith("/")) {
-      const parts = input.slice(1).split(/\s+/);
+      const fullInput = input.slice(1);
+      const parts = fullInput.split(/\s+/);
       const command = parts[0];
       const rest = parts.slice(1).join(" ");
 
-      if (command === "model") {
-        if (rest) {
-          args.model = rest;
-          session.model = rest;
-          renderer.setStatusLine(status());
+      if (command === "") {
+        renderer.displaySuggestions(getCommandSuggestions(""));
+        continue;
+      } else if (command === "help") {
+        const allCommands = COMMANDS.map((c) => `  /${c.name} — ${c.description}`);
+        renderer.error(`Available commands:\n${allCommands.join("\n")}`);
+        continue;
+      } else if (command === "model") {
+        if (rest === "") {
+          renderer.addMessage("system", `Current model: ${args.model}`);
+          const models = modelsConfig.map((m) => `${m.id} (${m.name})`);
+          const selected = await renderer.selectFromList(models, "Available Models:");
+          if (selected) {
+            const modelId = selected.split(" (")[0];
+            args.model = modelId;
+            session.model = modelId;
+            renderer.addMessage("system", `Model changed to: ${modelId}`);
+            renderer.setStatusLine(status());
+          }
           continue;
         } else {
-          renderer.error(`Current model: ${args.model}`);
+          args.model = rest;
+          session.model = rest;
+          renderer.addMessage("system", `Model changed to: ${rest}`);
+          renderer.setStatusLine(status());
           continue;
         }
+      } else if (command === "clear") {
+        session.messages = session.messages.filter((m) => m.role === "system");
+        renderer.error(`Session history cleared. ${session.messages.length} message(s) remaining.`);
+        renderer.setStatusLine(status());
+        continue;
+      } else if (command === "config") {
+        await handleConfigCommand(renderer);
+        continue;
       } else {
-        renderer.error(`Unknown command: /${command}`);
+        // Show suggestions for partial commands
+        const suggestions = getCommandSuggestions(command);
+        if (suggestions.length > 0) {
+          renderer.displaySuggestions(suggestions);
+        } else {
+          renderer.error(`Unknown command: /${command}`);
+        }
         continue;
       }
     }

@@ -153,9 +153,21 @@ class AgentLoop:
                     updated = decision.get("updatedArgs")
                     if updated is not None:
                         args = updated
-                    result = await asyncio.to_thread(
-                        self.executor.execute, name, args
-                    )
+                    if name == "bash":
+                        # bash is now a true coroutine — call it directly so it
+                        # runs on the event loop with no thread blocking.
+                        try:
+                            result = await self.executor.bash(**args)
+                        except TypeError as exc:
+                            result = {"output": "", "truncated": False, "error": f"bad arguments for bash: {exc}"}
+                        except Exception as exc:
+                            result = {"output": "", "truncated": False, "error": f"{type(exc).__name__}: {exc}"}
+                    else:
+                        # read / write / edit are synchronous and fast — keep
+                        # them off the event loop thread via to_thread.
+                        result = await asyncio.to_thread(
+                            self.executor.execute, name, args
+                        )
 
                 yield {
                     "type": "tool_result",

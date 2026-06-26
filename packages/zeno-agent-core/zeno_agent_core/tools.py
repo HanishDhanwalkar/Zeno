@@ -8,8 +8,8 @@ the problem in ``error`` so the agent loop keeps running.
 
 from __future__ import annotations
 
+import asyncio
 import os
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -150,116 +150,84 @@ class ToolExecutor:
             return _result(error=f"could not write {path}: {exc}")
         return _result(f"edited {path} (1 replacement)")
 
-    def bash(
+    async def bash(
         self, command: str, timeout: int = BASH_TIMEOUT_SEC, cwd: str | None = None, inputs: str | None = None
     ) -> dict[str, Any]:
+        """Run a shell command asynchronously using asyncio subprocesses.
+
+        Using ``asyncio.create_subprocess_shell`` keeps everything on the event
+        loop — no thread blocking, no Windows pipe-drain deadlocks that plagued
+        the old ``subprocess.run`` approach.
+        """
         workdir = self._resolve(cwd) if cwd else self.root
-        
-        # If inputs are provided, run interactively with those inputs
-        if inputs is not None:
-            return self._bash_with_inputs(command, workdir, inputs, timeout)
-        
+        stdin_data = inputs.encode("utf-8", errors="replace") if inputs is not None else None
+
         try:
-            proc = subprocess.run(
+            proc = await asyncio.create_subprocess_shell(
                 command,
-                shell=True,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 cwd=str(workdir),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=3,  # Short timeout to detect if script waits for input
-            )
-        except subprocess.TimeoutExpired:
-            # Script didn't finish in 3 seconds - likely waiting for input
-            return _result(
-                error=(
-                    "Script appears to be waiting for input.\n\n"
-                    "OPTIONS:\n"
-                    "1. Run it manually and share the output\n"
-                    "2. I can run it with inputs by calling: bash with inputs parameter\n\n"
-                    "Example: bash(command='python script.py', inputs='yes\\n42\\n')"
-                )
             )
         except OSError as exc:
             return _result(error=f"could not run command: {exc}")
 
-        combined = (proc.stdout or "") + (proc.stderr or "")
-        lines = combined.splitlines()
-        truncated = len(lines) > BASH_MAX_LINES
-        if truncated:
-            lines = lines[:BASH_MAX_LINES]
-        
-        result_output = "\n".join(lines)
-        if proc.returncode != 0:
-            result_output += f"\n[Exit Code: {proc.returncode}]"
-        
-        return _result(
-            result_output,
-            truncated=truncated,
-            exit_code=proc.returncode,
-        )
-    
-    def _bash_with_inputs(
-        self, command: str, workdir: Path, inputs: str, timeout: int
-    ) -> dict[str, Any]:
-        """Run a command with predetermined inputs."""
         try:
-            proc = subprocess.run(
-                command,
-                shell=True,
-                cwd=str(workdir),
-                input=inputs,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(input=stdin_data),
+                timeout=float(timeout),
             )
-        except subprocess.TimeoutExpired:
+        except asyncio.TimeoutError:
+            # Kill gracefully then drain — all async, no deadlock risk.
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=5.0)
+            except (asyncio.TimeoutError, OSError):
+                pass
             return _result(
-                error=f"command timed out after {timeout}s even with inputs provided",
-                exit_code=124
+                error=f"command timed out after {timeout}s",
+                exit_code=124,
             )
-        except OSError as exc:
-            return _result(error=f"could not run command with inputs: {exc}")
-        
-        # Prepare output with session feedback
-        output = []
-        output.append("=" * 60)
-        output.append("SCRIPT EXECUTION WITH INPUTS")
-        output.append(f"Command: {command}")
-        output.append(f"Inputs provided: {repr(inputs)}")
-        output.append("=" * 60)
-        output.append("")
-        
-        if proc.stdout:
-            output.append("[STDOUT]")
-            output.append(proc.stdout)
-        
-        if proc.stderr:
-            output.append("[STDERR]")
-            output.append(proc.stderr)
-        
-        # Add completion context for agent
-        if proc.returncode == 0:
-            output.append("")
-            output.append("[CONTEXT: Script completed successfully with provided inputs]")
+
+        stdout = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
+        stderr = stderr_b.decode("utf-8", errors="replace") if stderr_b else ""
+        rc = proc.returncode if proc.returncode is not None else 1
+
+        if inputs is not None:
+            # Show a clear session summary when inputs were supplied.
+            parts = [
+                "=" * 60,
+                "SCRIPT EXECUTION WITH INPUTS",
+                f"Command: {command}",
+                f"Inputs provided: {repr(inputs)}",
+                "=" * 60,
+                "",
+            ]
+            if stdout:
+                parts += ["[STDOUT]", stdout]
+            if stderr:
+                parts += ["[STDERR]", stderr]
+            parts.append(
+                "[CONTEXT: Script completed successfully with provided inputs]"
+                if rc == 0
+                else f"[CONTEXT: Script exited with code {rc}]"
+            )
+            combined = "\n".join(parts)
         else:
-            output.append("")
-            output.append(f"[CONTEXT: Script exited with code {proc.returncode}]")
-        
-        combined = "\n".join(output)
+            combined = stdout + stderr
+            if rc != 0:
+                combined += f"\n[Exit Code: {rc}]"
+
         lines = combined.splitlines()
         truncated = len(lines) > BASH_MAX_LINES
         if truncated:
             lines = lines[:BASH_MAX_LINES]
-        
-        return _result(
-            "\n".join(lines),
-            truncated=truncated,
-            exit_code=proc.returncode,
-        )
+
+        return _result("\n".join(lines), truncated=truncated, exit_code=rc)
 
 
 # Tool schemas advertised to the model (OpenAI function-calling shape).

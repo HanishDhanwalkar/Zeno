@@ -219,6 +219,31 @@ export class InkRenderer implements Renderer {
     });
   }
 
+  setCompletions(_completions: string[]): void {
+    // Ink renderer doesn't use readline completions (it uses React input)
+  }
+
+  async selectFromList(items: string[], title?: string): Promise<string | null> {
+    if (items.length === 0) return null;
+    
+    // For Ink, we just display the items as a message for now
+    if (title) {
+      this.store.log.push({ kind: "system", text: title });
+    }
+    items.forEach((item, i) => {
+      this.store.log.push({ kind: "system", text: `${i + 1}. ${item}` });
+    });
+    this.store.changed();
+    return null;
+  }
+
+  displaySuggestions(suggestions: string[]): void {
+    if (suggestions.length === 0) return;
+    const text = suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n");
+    this.store.log.push({ kind: "error", text });
+    this.store.changed();
+  }
+
   stop(): void {
     this.instance?.unmount();
     this.instance = null;

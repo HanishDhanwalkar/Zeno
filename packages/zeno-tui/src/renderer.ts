@@ -35,6 +35,15 @@ export interface Renderer {
   /** Read the next line of user input. Resolves null on EOF / exit request. */
   prompt(): Promise<string | null>;
 
+  /** Interactive selection from list using arrow keys. Returns selected item or null. */
+  selectFromList(items: string[], title?: string): Promise<string | null>;
+
+  /** Set autocomplete options for the prompt. */
+  setCompletions(completions: string[]): void;
+
+  /** Display command suggestions. */
+  displaySuggestions(suggestions: string[]): void;
+
   /** Register a handler fired when the user requests cancellation (Ctrl+C). */
   onCancel(handler: () => void): void;
 

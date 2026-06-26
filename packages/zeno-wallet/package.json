@@ -1,0 +1,19 @@
+{
+  "name": "@zeno/wallet",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Zeno Ethereum wallet: HD seed-based signing and transaction broadcasting.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "ethers": "^6.11.0"
+  },
+  "license": "MIT"
+}

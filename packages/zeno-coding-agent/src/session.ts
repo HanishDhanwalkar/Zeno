@@ -15,6 +15,7 @@ import type { RpcClient } from "./rpcClient.js";
 import { classify } from "./permission.js";
 import { prune, DEFAULT_PROTECTED_TOKENS } from "./prune.js";
 import { countMessageTokens } from "./tokens.js";
+import { WalletManager, type WalletConfig } from "@zeno/wallet";
 import {
   RPC,
   type Message,
@@ -52,6 +53,7 @@ export interface SessionOptions {
   systemPrompt?: string;
   protectedTokens?: number;
   callbacks?: SessionCallbacks;
+  walletConfig?: WalletConfig;
 }
 
 function formatToolResult(result: ToolResult): string {
@@ -68,6 +70,7 @@ export class SessionManager {
   readonly systemPrompt: string;
   readonly protectedTokens: number;
   messages: Message[] = [];
+  wallet: WalletManager | null = null;
 
   private client: RpcClient;
   private cb: SessionCallbacks;
@@ -83,6 +86,11 @@ export class SessionManager {
     this.cb = opts.callbacks ?? {};
     if (this.systemPrompt) {
       this.messages.push({ role: "system", content: this.systemPrompt });
+    }
+
+    // Initialize wallet if config provided
+    if (opts.walletConfig) {
+      this.wallet = new WalletManager(opts.walletConfig);
     }
   }
 
@@ -223,6 +231,35 @@ export class SessionManager {
   cancel(): void {
     if (this.activeStreamId) {
       this.client.sendNotification(RPC.streamCancel, { streamId: this.activeStreamId });
+    }
+  }
+
+  /**
+   * Initialize or restore wallet for this session.
+   * If wallet was created before, this loads it from disk.
+   * Otherwise, creates a new wallet.
+   */
+  async initializeWallet(): Promise<void> {
+    if (!this.wallet) {
+      throw new Error("Wallet not configured for this session");
+    }
+
+    const existing = await this.wallet.loadWallet();
+    if (!existing) {
+      await this.wallet.createWallet();
+      this.cb.onStatus?.("Wallet initialized");
+    } else {
+      this.cb.onStatus?.("Wallet restored");
+    }
+  }
+
+  /**
+   * Clean up wallet on session end.
+   */
+  destroy(): void {
+    if (this.wallet) {
+      this.wallet.destroy();
+      this.wallet = null;
     }
   }
 }

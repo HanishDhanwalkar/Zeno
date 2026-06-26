@@ -5,6 +5,7 @@
   "description": "Zeno — ultra-lean AI coding harness",
   "type": "module",
   "workspaces": [
+    "packages/zeno-wallet",
     "packages/zeno-coding-agent",
     "packages/zeno-tui"
   ],

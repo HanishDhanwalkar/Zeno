@@ -20,6 +20,15 @@ export { prune, DEFAULT_PROTECTED_TOKENS } from "./prune.js";
 export { classify } from "./permission.js";
 export type { Classification, Verdict } from "./permission.js";
 export { countTokens, countMessageTokens } from "./tokens.js";
+// Re-export wallet types for convenience (but don't re-export the class)
+// Users should import WalletManager directly from @zeno/wallet
+export type {
+  WalletConfig,
+  WalletState,
+  TransactionParams,
+  GasEstimate,
+  BroadcastResult,
+} from "@zeno/wallet";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

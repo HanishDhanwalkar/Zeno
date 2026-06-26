@@ -1,0 +1,29 @@
+{
+  "models": [
+    {
+      "id": "mock",
+      "name": "Mock (Offline)",
+      "description": "Offline mock provider for testing"
+    },
+    {
+      "id": "anthropic/claude-sonnet-4-6",
+      "name": "Claude 4.6 Sonnet",
+      "description": "Latest Anthropic Claude model"
+    },
+    {
+      "id": "azure/gpt-4o-mini",
+      "name": "Azure GPT-4 Mini",
+      "description": "Azure-hosted GPT-4 Mini"
+    },
+    {
+      "id": "ollama/hermes3:3b",
+      "name": "Ollama Hermes 3",
+      "description": "Local Hermes 3 via Ollama"
+    },
+    {
+      "id": "ollama/llama3.2:8b",
+      "name": "Ollama Llama 3.2 8B",
+      "description": "Local Llama 3.2 8B via Ollama"
+    }
+  ]
+}

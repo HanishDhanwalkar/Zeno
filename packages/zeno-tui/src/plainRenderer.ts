@@ -31,10 +31,9 @@ export class PlainRenderer implements Renderer {
   private readonly useColor: boolean;
   private status = "";
   private cancelHandler: (() => void) | null = null;
-  private lineQueue: string[] = [];
-  private lineWaiters: ((v: string | null) => void)[] = [];
   private closed = false;
   private sigintHandler: (() => void) | null = null;
+  private completions: string[] = [];
 
   constructor(opts: { color?: boolean } = {}) {
     this.useColor = opts.color ?? process.stdout.isTTY ?? false;
@@ -44,20 +43,23 @@ export class PlainRenderer implements Renderer {
     return color(this.useColor, code, text);
   }
 
+  setCompletions(completions: string[]): void {
+    this.completions = completions;
+  }
+
   start(): void {
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
-      terminal: false,
-    });
-    this.rl.on("line", (line) => {
-      const waiter = this.lineWaiters.shift();
-      if (waiter) waiter(line);
-      else this.lineQueue.push(line);
+      terminal: true,
+      prompt: "",
+      completer: (line: string) => {
+        const matches = this.completions.filter((c) => c.startsWith(line));
+        return [matches, line];
+      },
     });
     this.rl.on("close", () => {
       this.closed = true;
-      while (this.lineWaiters.length) this.lineWaiters.shift()!(null);
     });
     this.sigintHandler = () => {
       if (this.streaming && this.cancelHandler) {
@@ -144,28 +146,108 @@ export class PlainRenderer implements Renderer {
     return `${status}${this.paint(C.cyan, "you")}: `;
   }
 
-  private readLine(): Promise<string | null> {
-    const queued = this.lineQueue.shift();
-    if (queued !== undefined) return Promise.resolve(queued);
-    if (this.closed) return Promise.resolve(null);
-    return new Promise((resolve) => this.lineWaiters.push(resolve));
-  }
-
   async requestPermission(message: string): Promise<boolean> {
     process.stdout.write(
       this.paint(C.yellow, `permission needed: ${message}\nallow? [y/N] `),
     );
-    const answer = await this.readLine();
-    return answer !== null && /^y(es)?$/i.test(answer.trim());
+    return new Promise((resolve) => {
+      this.rl?.question("", (answer) => {
+        resolve(answer !== null && /^y(es)?$/i.test(answer.trim()));
+      });
+    });
   }
 
   async prompt(): Promise<string | null> {
-    process.stdout.write(this.promptText());
-    const answer = await this.readLine();
-    if (answer === null) return null;
-    const trimmed = answer.trim();
-    if (trimmed === "/exit" || trimmed === "/quit") return null;
-    return answer;
+    return new Promise((resolve) => {
+      if (!this.rl) return resolve(null);
+      
+      this.rl.setPrompt(this.promptText());
+      this.rl.prompt();
+      
+      const lineHandler = (answer: string) => {
+        this.rl?.removeListener("line", lineHandler);
+        const trimmed = answer.trim();
+        if (trimmed === "/exit" || trimmed === "/quit") resolve(null);
+        else resolve(answer);
+      };
+      
+      this.rl.on("line", lineHandler);
+    });
+  }
+
+  displaySuggestions(suggestions: string[]): void {
+    if (suggestions.length === 0) return;
+    const text = suggestions.map((s, i) => `  ${i + 1}. ${s}`).join("\n");
+    process.stdout.write(this.paint(C.dim, `\n${text}\n`));
+  }
+
+  async selectFromList(items: string[], title?: string): Promise<string | null> {
+    if (items.length === 0) return null;
+    
+    return new Promise((resolve) => {
+      let selected = 0;
+      const menuHeight = items.length + (title ? 3 : 0) + 3;
+      
+      const displayMenu = (isUpdate = false) => {
+        if (isUpdate) {
+          // Move cursor up to overwrite previous menu
+          process.stdout.write(`\u001b[${menuHeight}A`); // Move up
+          process.stdout.write("\u001b[0J"); // Clear from cursor to end of screen
+        }
+        
+        if (title) {
+          process.stdout.write(this.paint(C.cyan, `${title}\n`));
+          process.stdout.write(this.paint(C.dim, "─".repeat(60) + "\n"));
+        }
+        
+        items.forEach((item, i) => {
+          if (i === selected) {
+            process.stdout.write(this.paint(C.bold + C.cyan, `❯ ${item}\n`));
+          } else {
+            process.stdout.write(`  ${item}\n`);
+          }
+        });
+        
+        process.stdout.write(this.paint(C.dim, "(↑↓ arrows, Enter to select, Esc to cancel)\n"));
+      };
+      
+      // Display initial menu
+      displayMenu(false);
+      
+      // Handle keyboard input
+      const stdin = process.stdin;
+      stdin.setRawMode?.(true);
+      stdin.resume();
+      stdin.setEncoding("utf8");
+      
+      const onKeyPress = (key: string) => {
+        if (key === "\u001b[A") {
+          // Up arrow
+          selected = (selected - 1 + items.length) % items.length;
+          displayMenu(true);
+        } else if (key === "\u001b[B") {
+          // Down arrow
+          selected = (selected + 1) % items.length;
+          displayMenu(true);
+        } else if (key === "\r" || key === "\n") {
+          // Enter - select current item
+          stdin.setRawMode?.(false);
+          stdin.removeListener("data", onKeyPress);
+          process.stdout.write(this.paint(C.green, `✓ Selected: ${items[selected]}\n`));
+          resolve(items[selected]);
+        } else if (key === "\u001b") {
+          // Escape
+          stdin.setRawMode?.(false);
+          stdin.removeListener("data", onKeyPress);
+          // Clear the menu display
+          process.stdout.write(`\u001b[${menuHeight}A`);
+          process.stdout.write("\u001b[0J");
+          resolve(null);
+        }
+      };
+      
+      stdin.on("data", onKeyPress);
+    });
   }
 
   stop(): void {

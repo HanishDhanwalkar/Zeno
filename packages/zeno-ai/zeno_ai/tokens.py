@@ -1,28 +1,29 @@
-"""Approximate token counting.
-
-Deliberately dependency-free and rough. A real tokenizer (tiktoken) can be a
-drop-in replacement later; the rest of the system only relies on these two
-functions, so swapping the heuristic is contained here.
-"""
+"""token counter"""
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any, Iterable
 
-# Rough average of characters-per-token for English + code across common
-# tokenizers. Used as a fallback heuristic.
-_CHARS_PER_TOKEN = 4
+import tiktoken
+
+_DEFAULT_MODEL = "gpt-4o-mini" # TODO: move this to global config
 
 
-def count_tokens(text: str | None) -> int:
-    """Estimate the number of tokens in a string."""
+@lru_cache(maxsize=32)
+def _get_encoding(model: str):
+    try:
+        return tiktoken.encoding_for_model(model)
+    except KeyError:
+        return tiktoken.get_encoding("cl100k_base")
+
+
+def count_tokens(text: str | None, model: str = _DEFAULT_MODEL) -> int:
+    """Count tokens in a string using tiktoken."""
     if not text:
         return 0
-    # Blend a word-based and char-based estimate; max() keeps us from
-    # under-counting dense code with few spaces.
-    words = len(text.split())
-    chars = len(text)
-    return max(words, chars // _CHARS_PER_TOKEN, 1)
+    encoding = _get_encoding(model)
+    return len(encoding.encode(text))
 
 
 def _content_to_text(content: Any) -> str:
@@ -37,29 +38,39 @@ def _content_to_text(content: Any) -> str:
             if isinstance(part, str):
                 parts.append(part)
             elif isinstance(part, dict):
-                # common shapes: {"type":"text","text":...} / {"text":...}
                 parts.append(str(part.get("text") or part.get("content") or ""))
         return " ".join(parts)
     return str(content)
 
 
-def count_message_tokens(messages: Iterable[dict]) -> int:
-    """Estimate total tokens across a list of chat messages.
+def count_message_tokens(messages: Iterable[dict], model: str = _DEFAULT_MODEL) -> int:
+    """Estimate total tokens across chat messages.
 
-    Includes a small per-message overhead to approximate role/formatting
-    tokens, and accounts for tool calls / tool results.
+    This counts message content plus tool call names/arguments.
     """
     total = 0
     for msg in messages:
-        total += 4  # per-message overhead
-        total += count_tokens(_content_to_text(msg.get("content")))
+        total += count_tokens(_content_to_text(msg.get("content")), model=model)
+
+        total += count_tokens(msg.get("role"), model=model)
 
         for call in msg.get("tool_calls") or []:
             fn = call.get("function") or {}
-            total += count_tokens(fn.get("name"))
+            total += count_tokens(fn.get("name"), model=model)
             args = fn.get("arguments")
-            total += count_tokens(args if isinstance(args, str) else str(args))
+            total += count_tokens(args if isinstance(args, str) else str(args), model=model)
 
         if "name" in msg:
-            total += count_tokens(msg.get("name"))
+            total += count_tokens(msg.get("name"), model=model)
+
     return total
+
+
+if __name__ == "__main__":
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Summarize this file."},
+    ]
+
+    print(count_tokens("Hello! How can I assist you today?", model="gpt-4o-mini"))
+    print(count_message_tokens(messages, model="gpt-4o-mini"))

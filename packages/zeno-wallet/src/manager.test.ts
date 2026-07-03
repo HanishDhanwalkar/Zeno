@@ -18,11 +18,11 @@ import { join } from "node:path";
 const mockConfig: WalletConfig = {
   rpcUrl: "http://localhost:8545",
   chainId: 31337, // Hardhat default
+  encryptionKey: "test-encryption-key-123",
 };
 
 test("WalletManager - Get address before wallet creation throws error", () => {
   const manager = new WalletManager(mockConfig);
-
   assert.throws(
     () => manager.getAddress(),
     /Wallet not initialized/,
@@ -35,17 +35,14 @@ test("WalletManager - Load wallet returns null when no wallet exists", async () 
     ...mockConfig,
     walletPath: join(tmpdir(), `nonexistent-${Date.now()}.json`),
   };
-
   const manager = new WalletManager(config);
   const state = await manager.loadWallet();
-
   assert.equal(state, null, "Should return null when wallet does not exist");
 });
 
 test("WalletManager - Wallet destruction clears state", () => {
   const manager = new WalletManager(mockConfig);
   manager.destroy();
-
   assert.throws(
     () => manager.getAddress(),
     /Wallet not initialized/,
@@ -67,11 +64,13 @@ test("WalletManager - Wallet config structure is valid", () => {
     rpcUrl: "https://sepolia.infura.io/v3/YOUR-PROJECT-ID",
     chainId: 11155111, // Sepolia
     walletPath: join(tmpdir(), "test-wallet.json"),
+    encryptionKey: "test-encryption-key-456",
   };
 
   assert.ok(config.rpcUrl, "RPC URL should be set");
   assert.ok(config.chainId > 0, "Chain ID should be positive");
   assert.ok(config.walletPath, "Wallet path should be set");
+  assert.ok(config.encryptionKey, "Encryption key should be set");
 });
 
 test("WalletManager - Transaction parameters validation", () => {
@@ -102,14 +101,12 @@ test("WalletManager - Error handling for invalid address format", () => {
 test("WalletManager - Wallet file permissions structure", () => {
   const mode = 0o600; // Restricted read/write for owner only
   const isRestricted = (mode & 0o077) === 0; // No group/other permissions
-
   assert.ok(isRestricted, "Wallet file should have restricted permissions");
 });
 
 test("WalletManager - Mnemonic structure validation", () => {
   const validMnemonic =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-
   const words = validMnemonic.split(" ");
   assert.equal(words.length, 12, "BIP-39 seed should have 12 words");
   assert.ok(words.every(w => w.length > 0), "All words should be non-empty");
@@ -131,7 +128,6 @@ test("WalletManager - Derivation path format validation", () => {
 
 test("WalletManager - Error message formatting", () => {
   const manager = new WalletManager(mockConfig);
-
   try {
     manager.getAddress();
     assert.fail("Should have thrown");

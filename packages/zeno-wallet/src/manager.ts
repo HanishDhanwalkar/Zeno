@@ -12,22 +12,27 @@
  */
 
 import {
-  Wallet,
   ethers,
   JsonRpcProvider,
   TransactionResponse,
   TransactionReceipt,
-  toBeHex,
   type TransactionRequest,
 } from "ethers";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  createCipheriv,
+  createDecipheriv,
+  pbkdf2Sync,
+  randomBytes,
+} from "node:crypto";
 
 export interface WalletConfig {
   rpcUrl: string;
   chainId: number;
   walletPath?: string;
+  encryptionKey?: string; // Recommended for securing the mnemonic on disk
 }
 
 export interface WalletState {
@@ -66,7 +71,9 @@ export interface BroadcastResult {
  */
 export class WalletManager {
   private provider: JsonRpcProvider;
-  private wallet: Wallet | null = null;
+  // FIX 1: Changed from AbstractSigner to HDNodeWallet. 
+  // HDNodeWallet has the synchronous `address` property.
+  private wallet: ethers.HDNodeWallet | null = null;
   private walletState: WalletState | null = null;
   private config: WalletConfig;
   private defaultDerivationPath = "m/44'/60'/0'/0/0";
@@ -74,6 +81,27 @@ export class WalletManager {
   constructor(config: WalletConfig) {
     this.config = config;
     this.provider = new JsonRpcProvider(config.rpcUrl);
+  }
+
+  private encrypt(text: string, password: string): string {
+    const salt = randomBytes(16);
+    const key = pbkdf2Sync(password, salt, 100000, 32, "sha256");
+    const iv = randomBytes(16);
+    const cipher = createCipheriv("aes-256-cbc", key, iv);
+    let encrypted = cipher.update(text, "utf8", "hex");
+    encrypted += cipher.final("hex");
+    return salt.toString("hex") + ":" + iv.toString("hex") + ":" + encrypted;
+  }
+
+  private decrypt(encryptedText: string, password: string): string {
+    const [saltHex, ivHex, encrypted] = encryptedText.split(":");
+    const salt = Buffer.from(saltHex, "hex");
+    const key = pbkdf2Sync(password, salt, 100000, 32, "sha256");
+    const iv = Buffer.from(ivHex, "hex");
+    const decipher = createDecipheriv("aes-256-cbc", key, iv);
+    let decrypted = decipher.update(encrypted, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
   }
 
   /**
@@ -90,30 +118,31 @@ export class WalletManager {
       // Generate or use provided mnemonic
       let seedPhrase = mnemonic;
       if (!seedPhrase) {
-        const randomWallet = Wallet.createRandom();
+        const randomWallet = ethers.Wallet.createRandom();
         seedPhrase = randomWallet.mnemonic?.phrase;
       }
+
       if (!seedPhrase) {
         throw new Error("Failed to generate or use mnemonic");
       }
 
       // Create wallet from mnemonic using ethers v6 API
-      // fromPhrase returns a wallet at the default path, then derive from there
       const hdNode = ethers.HDNodeWallet.fromMnemonic(
         ethers.Mnemonic.fromPhrase(seedPhrase),
         path
       );
-      this.wallet = hdNode.connect(this.provider) as any;
+      this.wallet = hdNode.connect(this.provider);
 
-      // Get initial nonce from network
+      // Get initial nonce from network (use "pending" to include mempool txs)
       const nonce = await this.provider.getTransactionCount(
-        this.wallet!.address
+        this.wallet.address,
+        "pending"
       );
 
       this.walletState = {
         mnemonic: seedPhrase,
         derivationPath: path,
-        address: this.wallet!.address,
+        address: this.wallet.address,
         nonce,
       };
 
@@ -125,7 +154,9 @@ export class WalletManager {
       return this.walletState;
     } catch (error) {
       throw new Error(
-        `Failed to create wallet: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to create wallet: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
     }
   }
@@ -149,19 +180,22 @@ export class WalletManager {
         ethers.Mnemonic.fromPhrase(state.mnemonic),
         state.derivationPath
       );
-      this.wallet = hdNode.connect(this.provider) as any;
+      this.wallet = hdNode.connect(this.provider);
 
-      // Update nonce from network
+      // Update nonce from network (use "pending" to include mempool txs)
       const nonce = await this.provider.getTransactionCount(
-        this.wallet!.address
+        this.wallet.address,
+        "pending"
       );
       state.nonce = nonce;
-
       this.walletState = state;
+
       return this.walletState;
     } catch (error) {
       throw new Error(
-        `Failed to load wallet: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to load wallet: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
     }
   }
@@ -187,7 +221,7 @@ export class WalletManager {
 
       const tx: TransactionRequest = {
         to: params.to,
-        value: params.value ? toBeHex(BigInt(params.value)) : "0x0",
+        value: params.value ? BigInt(params.value) : 0n,
         data: params.data || "0x",
         from: this.wallet.address,
       };
@@ -210,7 +244,9 @@ export class WalletManager {
       };
     } catch (error) {
       throw new Error(
-        `Gas estimation failed: ${error instanceof Error ? error.message : String(error)}`
+        `Gas estimation failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
     }
   }
@@ -224,45 +260,46 @@ export class WalletManager {
         throw new Error("Wallet not initialized");
       }
 
-      // Ensure nonce is up-to-date
-      const currentNonce = await this.provider.getTransactionCount(
-        this.wallet.address
-      );
-      this.walletState.nonce = currentNonce;
+      // Use local nonce to prevent collisions in rapid transactions
+      const nonce = this.walletState.nonce;
 
       const tx: TransactionRequest = {
         to: params.to,
-        value: params.value ? toBeHex(BigInt(params.value)) : "0x0",
+        value: params.value ? BigInt(params.value) : 0n,
         data: params.data || "0x",
-        gasLimit: params.gasLimit
-          ? BigInt(params.gasLimit)
-          : BigInt(21000),
-        nonce: this.walletState.nonce,
-        chainId: this.config.chainId,
+        gasLimit: params.gasLimit ? BigInt(params.gasLimit) : 21000n,
+        nonce: nonce,
+        chainId: BigInt(this.config.chainId),
       };
 
       // Use modern fee mechanism if available
       const feeData = await this.provider.getFeeData();
       if (feeData.maxFeePerGas) {
-        (tx as any).maxFeePerGas = BigInt(
+        tx.maxFeePerGas = BigInt(
           params.maxFeePerGas || feeData.maxFeePerGas.toString()
         );
-        (tx as any).maxPriorityFeePerGas = BigInt(
+        tx.maxPriorityFeePerGas = BigInt(
           params.maxPriorityFeePerGas ||
             feeData.maxPriorityFeePerGas?.toString() ||
             "1000000000"
         );
       } else {
-        (tx as any).gasPrice = BigInt(
+        tx.gasPrice = BigInt(
           params.gasPrice || feeData.gasPrice?.toString() || "20000000000"
         );
       }
 
       const signedTx = await this.wallet.signTransaction(tx);
+
+      // Increment local nonce immediately after signing to prevent collisions
+      this.walletState.nonce++;
+
       return signedTx || "";
     } catch (error) {
       throw new Error(
-        `Transaction signing failed: ${error instanceof Error ? error.message : String(error)}`
+        `Transaction signing failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
     }
   }
@@ -305,16 +342,12 @@ export class WalletManager {
         };
       }
 
-      // Increment nonce after successful broadcast
-      if (this.walletState) {
-        this.walletState.nonce++;
-      }
-
       return {
         success: receipt.status === 1,
         txHash: receipt.hash,
         receipt,
-        confirmationBlocks: typeof receipt.confirmations === "function" ? 0 : (receipt.confirmations as any) || 0,
+        // FIX 2: In ethers v6, confirmations is an async method, not a property.
+        confirmationBlocks: await receipt.confirmations(),
       };
     } catch (error) {
       return {
@@ -363,12 +396,15 @@ export class WalletManager {
     if (!this.wallet) {
       throw new Error("Wallet not initialized");
     }
-    const nonce = await this.provider.getTransactionCount(this.wallet.address);
+    const nonce = await this.provider.getTransactionCount(
+      this.wallet.address,
+      "pending"
+    );
     return nonce;
   }
 
   /**
-   * Save wallet state to disk (encrypted path).
+   * Save wallet state to disk (encrypted).
    */
   private saveWalletState(): void {
     if (!this.walletState || !this.config.walletPath) {
@@ -377,10 +413,19 @@ export class WalletManager {
 
     try {
       const stateJson = JSON.stringify(this.walletState, null, 2);
-      writeFileSync(this.config.walletPath, stateJson, { mode: 0o600 });
+      let dataToWrite = stateJson;
+      
+      if (this.config.encryptionKey) {
+        dataToWrite = this.encrypt(stateJson, this.config.encryptionKey);
+      }
+      
+      writeFileSync(this.config.walletPath, dataToWrite, { mode: 0o600 });
+      chmodSync(this.config.walletPath, 0o600); // Force restricted permissions
     } catch (error) {
       console.warn(
-        `Failed to save wallet state: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to save wallet state: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
     }
   }
@@ -394,11 +439,18 @@ export class WalletManager {
     }
 
     try {
-      const stateJson = readFileSync(this.config.walletPath, "utf-8");
+      let stateJson = readFileSync(this.config.walletPath, "utf-8");
+      
+      if (this.config.encryptionKey) {
+        stateJson = this.decrypt(stateJson, this.config.encryptionKey);
+      }
+      
       return JSON.parse(stateJson) as WalletState;
     } catch (error) {
       console.warn(
-        `Failed to read wallet state: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to read wallet state: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
       return null;
     }

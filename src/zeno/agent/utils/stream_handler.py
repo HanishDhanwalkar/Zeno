@@ -1,9 +1,12 @@
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.callbacks.base import BaseCallbackHandler
 
-from zeno.agent.loop import AgentLoop
+if TYPE_CHECKING:
+    from zeno.agent.loop import AgentLoop
 
 
 class AnswerStreamHandler(BaseCallbackHandler):
@@ -16,7 +19,7 @@ class AnswerStreamHandler(BaseCallbackHandler):
         self.stream_toolcall = False
         self.registered_toolnames = {
             definition["functions"]["name"]
-            for definition in self.stream_loop.tools.definitions
+            for definition in getattr(self.stream_loop.tools, "definitions", [])
         }
 
     def reset(self) -> None:
@@ -32,7 +35,7 @@ class AnswerStreamHandler(BaseCallbackHandler):
 
     def on_model_start(self) -> None:
         self.reset()
-        
+
     def on_llm_new_token(
         self, token: str, chunk: Any, **kwargs: Any
     ) -> None:
@@ -41,11 +44,11 @@ class AnswerStreamHandler(BaseCallbackHandler):
             self.stream_toolcall = True
         if self.stream_toolcall or self.stream_loop.on_token is None:
             return
-        
-        for text in self.stream_loop.conent_text_tokens(token):
+
+        for text in self.stream_loop._content_text_tokens(token):
             if self.hold_candidate:
                 continue
-            
+
             combined = self.stream_tail + text
             self.stream_tail = ""
-            
+            self.emit(combined)

@@ -95,7 +95,7 @@ class AgentLoop:
                 self.on_message(message)
 
         for message in reversed(new_messages):
-            if message.get("role") == "assistant" and message.get("tool_calls"):
+            if message.get("role") == "assistant" and not message.get("tool_calls"):
                 content = message.get("content")
                 text = "".join(self._content_text_tokens(content))
                 if text.strip():

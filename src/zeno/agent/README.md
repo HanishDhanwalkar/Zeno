@@ -29,4 +29,12 @@ sequenceDiagram
 
 ## Loop
 
+./loop.py
+
 ## Prompt
+
+./prompts.py
+
+## StreamHandler
+
+./utils/stream_handler.py

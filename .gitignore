@@ -1,6 +1,5 @@
-.env
 
 __pycache__/
-node_modules/
-dist/
+.env
+.vscode/
 .pytest_cache/

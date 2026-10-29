@@ -6,7 +6,6 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from zeno.agent.prompts import BASE_SYSTEM_PROMPT
-from zeno.tools import ToolRegistry
 from zeno.agent.utils.stream_handler import AnswerStreamHandler
 
 
@@ -18,7 +17,6 @@ class AgentLoop:
     def __init__(
         self,
         client: Any | None,
-        tools: ToolRegistry,
         model: str,
         on_message: Any | None = None,
         on_token: Callable[[str], None] | None = None,
@@ -27,7 +25,6 @@ class AgentLoop:
             raise ValueError("Model must not be empty")
 
         self.client = client
-        self.tools = tools
         self.model = model
         self.on_message = on_message
         self.on_token = on_token

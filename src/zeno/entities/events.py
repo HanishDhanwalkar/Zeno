@@ -51,25 +51,43 @@ class ToolResult:
 
 @dataclass(frozen=True, slots=True)
 class PermissionRequested:
-    ...
+    tool_call_id: str
+    name: str
+    args: str
+    kind: Literal["permission_requested"] = "permission_requested"
+
 
 @dataclass(frozen=True, slots=True)
 class AskUserRequested:
-    ...
+    question: str
+    kind: Literal["ask_user_requested"] = "ask_user_requested"
+
+
+@dataclass(frozen=True, slots=True)
+class TaskListUpdated:
+    tasks: list[str]
+    kind: Literal["task_list_updated"] = "task_list_updated"
+
 
 @dataclass(frozen=True, slots=True)
 class ContextCompacted:
-    ...
+    before_tokens: int
+    kept_messages: int
+    kind: Literal["context_compacted"] = "context_compacted"
+
 
 @dataclass(frozen=True, slots=True)
-class ContexMicroCompacted:
-    ...
-    
+class ContextMicrocompacted:
+    before_tokens: int
+    elided_count: int
+    kind: Literal["context_microcompacted"] = "context_microcompacted"
+
+
 @dataclass(frozen=True, slots=True)
 class AgentError:
     message: str
     kind: Literal["agent_error"] = "agent_error"
-    
+
 
 Event = (
     TurnStarted
@@ -78,9 +96,10 @@ Event = (
     | ThinkingDelta
     | ToolCallStarted
     | ToolResult
-    # | PermissionError
-    # | AskUserRequested
-    # | ContextCompacted
-    # | ContexMicroCompacted
+    | PermissionRequested
+    | AskUserRequested
+    | TaskListUpdated
+    | ContextCompacted
+    | ContextMicrocompacted
     | AgentError
 )
